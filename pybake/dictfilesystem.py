@@ -105,7 +105,9 @@ class DictFileSystem(object):
 
     def get_dict_tree(self):
         def encode(type, content):
-            return ('base64', binascii.b2a_base64(content))
+            if isinstance(content, str):
+                content = content.encode('utf-8')
+            return ('base64', binascii.b2a_base64(content).decode('utf-8'))
             # try:
             #     content.decode('ascii')
             #     return ('raw', content)

@@ -1,7 +1,13 @@
+from __future__ import absolute_import
+
 import errno
 import os
-from StringIO import StringIO
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import StringIO
 
+from pybake.six import builtins
 from pybake.filesysteminterceptor import FileSystemInterceptor
 
 
@@ -21,10 +27,10 @@ class DictFileSystemInterceptor(FileSystemInterceptor):
         self._reader = reader
         self._fileno = FileNo()
 
-    def _builtin_open(self, path, mode='r'):
+    def _builtin_open(self, path, mode='r', *args, **kwargs):
         tpath = self._reader.tpath(path)
         if tpath is None:
-            return self._oldhooks['__builtin__.open'](path, mode)
+            return self._oldhooks['__builtin__.open'](path, mode, *args, **kwargs)
         if 'w' in mode:
             raise IOError(errno.EROFS, 'Read-only file system', path)
         content = self._reader.read(tpath)

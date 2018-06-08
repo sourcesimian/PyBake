@@ -1,15 +1,14 @@
 
-develop:
-	virtualenv --no-site-packages --python /usr/bin/python2.7 virtualenv
-	{ \
-	    . ./virtualenv/bin/activate; \
-	    curl https://bootstrap.pypa.io/get-pip.py | python; \
-	    pip install pytest flake8; \
-	}
+develop2:
+	./tools/make-virtualenv2.sh
+
+
+develop3:
+	./tools/make-virtualenv3.sh
 
 
 clean:
-	git clean -dfx
+	git clean -dfxn | grep 'Would remove' | awk '{print $3}' | grep -v -e '^.idea' -e '^.cache' | xargs rm -rf
 
 
 check:
@@ -17,6 +16,14 @@ check:
 
 
 test:
+	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
+
+
+test2: develop2
+	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
+
+
+test3: develop3
 	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
 
 

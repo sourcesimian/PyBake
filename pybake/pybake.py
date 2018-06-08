@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import base64
 import json
 import os
@@ -5,12 +7,13 @@ import os.path
 import zlib
 import textwrap
 
-from dictfilesystem import DictFileSystem
-from dictfilesystembuilder import DictFileSystemBuilder
+from pybake.dictfilesystem import DictFileSystem
+from pybake.dictfilesystembuilder import DictFileSystemBuilder
 
 src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BAKED_FILES = (
+    'six.py',
     'abstractimporter.py',
     'dictfilesystem.py',
     'filesysteminterceptor.py',
@@ -20,6 +23,7 @@ BAKED_FILES = (
 )
 
 PRELOAD_MODULES = (
+    'six',
     'abstractimporter',
     'dictfilesystem',
     'filesysteminterceptor',
@@ -37,50 +41,74 @@ class PyBake(object):
         self._python = python
         self._fs = DictFileSystem()
         self._fs_builder = DictFileSystemBuilder(self._fs)
+        self._add_pybake()
 
-    def add_module(self, module, base=()):
-        self._fs_builder.add_module(module, base)
+    def add_module(self, module, tpath=()):
+        """
+        Add a module to the filesystem blob. Where `module` can a reference to a Python module or
+        a path to a directory. The optional `tpath` is the path at which the module will be stored
+        in the filesystem, default is at root which is `()`
+        """
+        self._fs_builder.add_module(module, tpath)
 
     def add_file(self, tpath, fh):
+        """
+        Write the contents of `fh` a file like object to the the `tpath` location in the filesystem
+        blob, there `tpath` is a tuple of path elements.
+        """
         if not isinstance(tpath, (list, tuple)):
             raise TypeError(repr(tpath))
         self._fs_builder.add_file(tpath, fh)
 
-    def write_dist(self, path):
-        for name in BAKED_FILES:
-            with open(os.path.join(os.path.dirname(__file__), name), 'rb') as fh:
-                self.add_file(('pybake', name), fh)
-
-        path = os.path.expanduser(path)
-        with open(path, 'wb') as fh:
-            self._dump_dist(fh)
-        os.chmod(path, 0o755)
-
-    def _dump_dist(self, fh):
+    def dump_bake(self, fh):
+        """
+        Write the complete bake to `fh`, a file like object
+        """
         self._dump_header(fh)
         self._dump_blob(fh)
         self._dump_footer(fh)
         self._dump_eof(fh)
 
+    def write_dist(self, path):
+        """
+        Write the complete bake to `path` and make it executable
+        """
+        path = os.path.expanduser(path)
+        with open(path, 'wb') as fh:
+            self.dump_bake(fh)
+        os.chmod(path, 0o755)
+
+    def _add_pybake(self):
+        for name in BAKED_FILES:
+            with open(os.path.join(os.path.dirname(__file__), name), 'rb') as fh:
+                self.add_file(('pybake', name), fh)
+
+    @staticmethod
+    def _write(fh, content):
+        fh.write(content.encode('utf-8'))
+
     def _dump_header(self, fh):
-        fh.write('#!/usr/bin/env %s\n' % self._python)
-        fh.write(self._s(self._header))
+        self._write(fh, '#!/usr/bin/env %s\n' % self._python)
+        self._write(fh, self._s(self._header))
 
     def _dump_footer(self, fh):
-        fh.write(self._s(self._footer))
+        self._write(fh, self._s(self._footer))
 
     def _dump_eof(self, fh):
-        fh.write('#' * (self._width - 3 - len(self._suffix)) + 'END' + self._suffix + '\n')
+        self._write(fh, '#' * (self._width - 3 - len(self._suffix)) + 'END' + self._suffix + '\n')
 
     def _dump_blob(self, fh):
         inline, execable = self._get_launcher()
-        fh.write("_='''")
+        self._write(fh, "_='''")
 
         blob = (execable, PRELOAD_MODULES, self._fs.get_dict_tree())
-        fh.write(self.b64e(zlib.compress(json.dumps(blob, sort_keys=True, separators=(',', ':')), 9),
-                           self._width, 5))
-        fh.write("'''\n")
-        fh.write(self._s(inline))
+        self._write(fh, self._b64e(
+                            zlib.compress(
+                                json.dumps(blob, sort_keys=True, separators=(',', ':')).encode('utf-8')
+                                    , 9),
+                            self._width, 5))
+        self._write(fh, "'''\n")
+        self._write(fh, self._s(inline))
 
     def _get_launcher(self):
         with open(os.path.join(os.path.dirname(__file__), 'launcher.py')) as fh:
@@ -95,17 +123,17 @@ class PyBake(object):
         )
 
     @staticmethod
-    def dedent(content, offset=0):
+    def _dedent(content, offset=0):
         ret = textwrap.dedent(content)
         if offset:
             ret = ' ' * offset + ret.replace('\n', '\n' + ' ' * offset).rstrip(' ')
         return ret
 
     def _s(self, content):
-        return self.suffix(content, self._suffix, self._width - len(self._suffix))
+        return self._add_suffix(content, self._suffix, self._width - len(self._suffix))
 
     @staticmethod
-    def suffix(content, suffix, offset=78):
+    def _add_suffix(content, suffix, offset=78):
         ret = []
         for line in content.splitlines():
             if len(line) <= offset:
@@ -117,9 +145,10 @@ class PyBake(object):
         return ret
 
     @staticmethod
-    def b64e(str, line, first):
+    def _b64e(str, line, first):
         first = line - first
-        out = base64.encodestring(str).replace('\n', '')
+        out = base64.encodestring(str)
+        out = out.decode('utf-8').replace('\n', '')
         lines = []
         a = 0
         b = first or line
