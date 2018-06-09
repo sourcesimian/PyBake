@@ -1,3 +1,9 @@
+import sys
+
+if sys.version_info[0] == 3:
+    BUILTINS_OPEN = 'builtins.open'
+else:
+    BUILTINS_OPEN = '__builtin__.open'
 
 
 class FileSystemInterceptor(object):

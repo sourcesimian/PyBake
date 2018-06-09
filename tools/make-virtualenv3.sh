@@ -14,6 +14,7 @@ if [ ! -e "$PIP_DOWNLOAD_CACHE/get-pip.py" ]; then
 fi
 cat "$PIP_DOWNLOAD_CACHE/get-pip.py" | python
 
-pip install pytest flake8
+pip install pytest flake8 bpython
 
 python ./setup.py develop
+python -V

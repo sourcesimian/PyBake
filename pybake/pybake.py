@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-import base64
+import binascii
 import json
 import os
 import os.path
@@ -13,7 +13,7 @@ from pybake.dictfilesystembuilder import DictFileSystemBuilder
 src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BAKED_FILES = (
-    'six.py',
+    'v2v3.py',
     'abstractimporter.py',
     'dictfilesystem.py',
     'filesysteminterceptor.py',
@@ -23,7 +23,7 @@ BAKED_FILES = (
 )
 
 PRELOAD_MODULES = (
-    'six',
+    'v2v3',
     'abstractimporter',
     'dictfilesystem',
     'filesysteminterceptor',
@@ -102,11 +102,10 @@ class PyBake(object):
         self._write(fh, "_='''")
 
         blob = (execable, PRELOAD_MODULES, self._fs.get_dict_tree())
-        self._write(fh, self._b64e(
-                            zlib.compress(
-                                json.dumps(blob, sort_keys=True, separators=(',', ':')).encode('utf-8')
-                                    , 9),
-                            self._width, 5))
+        json_blob = json.dumps(blob, sort_keys=True, separators=(',', ':'))
+        zlib_blob = zlib.compress(json_blob.encode('utf-8'))
+        b64_blob = self._b64e(zlib_blob, self._width, 5)
+        self._write(fh, b64_blob)
         self._write(fh, "'''\n")
         self._write(fh, self._s(inline))
 
@@ -147,7 +146,7 @@ class PyBake(object):
     @staticmethod
     def _b64e(str, line, first):
         first = line - first
-        out = base64.encodestring(str)
+        out = binascii.b2a_base64(str)
         out = out.decode('utf-8').replace('\n', '')
         lines = []
         a = 0

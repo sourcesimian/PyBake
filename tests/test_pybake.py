@@ -1,34 +1,26 @@
+import re
+import binascii
+import json
+import zlib
 import sys
 import subprocess
 try:
-    from StringIO import StringIO
+    from StringIO import StringIO as BytesIO
 except ImportError:
-    from io import StringIO
+    from io import BytesIO
 from textwrap import dedent
 
 import pybake
 from pybake import PyBake
 
 
-def run_code(cwd, code):
-    args = [sys.executable, '-c', code]
-    p = subprocess.Popen(args=args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    p.wait()
-    return p.returncode, p.stdout.read().decode('utf-8'), p.stderr.read().decode('utf-8')
-
-
-def test_foo_as_module(tmpdir):
+def test_bake(tmpdir):
     header = '# HEADER'
     footer = '# FOOTER'
     width = 50
     pb = PyBake(header, footer, width=width, suffix='#|', python='python2')
 
-    import tests.foo
-    pb.add_module(tests.foo)
-
-    pb.add_module(pybake, ('sub',))
-
-    text = StringIO('Hello world!')
+    text = BytesIO(b'Hello world!')
     pb.add_file(('res', 'msg.txt'), text)
 
     path = str(tmpdir.join('foobake.py'))
@@ -45,6 +37,58 @@ def test_foo_as_module(tmpdir):
 
     assert len(bake_content_lines[-1]) == width
 
+    b64_blob = None
+    start, end = "_='''", "'''"
+    for line in bake_content_lines:
+        if start in line:
+            b64_blob = line[len(start):]
+            continue
+        if end in line:
+            i = line.find(end)
+            b64_blob += line[:i]
+            break
+        if b64_blob is not None:
+            b64_blob += line + '\n'
+
+    zlib_blob = binascii.a2b_base64(b64_blob)
+    json_blob = zlib.decompress(zlib_blob)
+    blob = json.loads(json_blob)
+    execable, preload, fs = blob
+
+    assert fs['res']['msg.txt'][0] == 'base64'
+
+    expected = b'Hello world!'
+    actual = binascii.a2b_base64(fs['res']['msg.txt'][1])
+    assert expected == actual
+
+
+def run_code(cwd, code):
+    args = [sys.executable, '-c', code]
+    p = subprocess.Popen(args=args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p.wait()
+    return p.returncode, p.stdout.read().decode('utf-8'), p.stderr.read().decode('utf-8')
+
+
+def test_as_module(tmpdir):
+    header = '# HEADER'
+    footer = '# FOOTER'
+    width = 50
+    pb = PyBake(header, footer, width=width, suffix='#|', python='python2')
+
+    text = BytesIO(b'')
+    pb.add_file(('tests', '__init__.py'), text)
+
+    import tests.foo
+    pb.add_module(tests.foo)
+
+    pb.add_module(pybake, ('sub',))
+
+    text = BytesIO(b'Hello world!')
+    pb.add_file(('res', 'msg.txt'), text)
+
+    path = str(tmpdir.join('foobake.py'))
+    pb.write_dist(path)
+
     # Test dir() on module
     _, stdout, stderr = run_code(tmpdir.strpath,
         r"import foobake; print('\n'.join(sorted(dir(foobake))))")
@@ -59,7 +103,15 @@ def test_foo_as_module(tmpdir):
     _, stdout, _ = run_code(tmpdir.strpath,
         r"import foobake, os; print(foobake.__file__)")
 
-    assert stdout.rstrip().endswith('foobake.pyc')
+    assert stdout.rstrip().endswith('foobake.pyc') or stdout.rstrip().endswith('foobake.py')
+
+
+    # Test os.path.exists() on blob file system
+    _, stdout, stderr = run_code(tmpdir.strpath,
+        r"import foobake, os; print(os.path.exists(foobake.__file__))")
+
+    assert stdout.rstrip() == 'True'
+
 
     # Test listdir() on blob file system
     _, stdout, _ = run_code(tmpdir.strpath,
@@ -73,20 +125,20 @@ def test_foo_as_module(tmpdir):
         'dictfilesystem.py',
         'dictfilesystembuilder.py',
         'dictfilesysteminterceptor.py',
-        'dictimporter.py',
         'filesysteminterceptor.py',
         'launcher.py',
         'moduletree.py',
         'pybake.py',
-        'six.py',
+        'v2v3.py',
     )
     for item in expected:
         assert item in found
 
     # Test open() on blob file system
-    _, stdout, _ = run_code(tmpdir.strpath,
-        "import foobake, os; print open(os.path.join(foobake.__file__, 'res/msg.txt')).read()")
+    _, stdout, stderr = run_code(tmpdir.strpath,
+        "import foobake, os; print(open(os.path.join(foobake.__file__, 'res/msg.txt')).read().decode('utf-8'))")
 
+    print(stderr)
     assert stdout == 'Hello world!\n'
 
 
@@ -94,33 +146,65 @@ def test_foo_as_module(tmpdir):
     _, stdout, _ = run_code(tmpdir.strpath,
         "import foobake; from tests.foo import Foo; f = Foo(); print(f.file()); print(f.src())")
 
-    assert stdout.splitlines() == [
-        'foobake.pyc/tests/foo/foo.py',
+    print(stdout)
+
+    actual = stdout.splitlines()
+    expected = (
+        'foobake.py/tests/foo/foo.py',
         'foobake.pyc/tests/foo/foo.py'
-    ]
+    )
+    for item in actual:
+        assert item.endswith(expected)
 
     # Test exception tracebacks on blob files system
     _, _, stderr = run_code(tmpdir.strpath,
         "import foobake; from tests.foo import Foo; f = Foo(); f.bang()")
 
-    assert stderr == dedent('''\
+    def normalise_traceback(input):
+        return re.sub('File ".*foobake.py(c)?', 'File "foobake.py', input)
+
+    stderr = normalise_traceback(stderr)
+    print(stderr)
+    expected = dedent('''\
         Traceback (most recent call last):
           File "<string>", line 1, in <module>
-          File "foobake.pyc/tests/foo/foo.py", line 16, in bang
-          File "foobake.pyc/tests/foo/foo.py", line 19, in _bang
+          File "foobake.py/tests/foo/foo.py", line 16, in bang
+          File "foobake.py/tests/foo/foo.py", line 19, in _bang
         ValueError: from Foo
         ''')
 
+    assert expected == stderr
 
     _, _, stderr = run_code(tmpdir.strpath,
                             "import foobake; import tests.foo.bad")
-
+    stderr = normalise_traceback(stderr)
     print(stderr)
-    assert stderr == dedent('''\
-        Traceback (most recent call last):
-          File "<string>", line 1, in <module>
-          File "foobake.pyc/pybake/abstractimporter.py", line 93, in load_module
-          File "foobake.pyc/pybake/abstractimporter.py", line 83, in load_module
-        ImportError: SyntaxError: invalid syntax (bad.py, line 2), while importing 'tests.foo.bad'
-        ''')
 
+    if sys.version_info[0] == 3:
+        expected = dedent('''\
+            Traceback (most recent call last):
+              File "foobake.py/pybake/abstractimporter.py", line 83, in load_module
+              File "foobake.py/tests/foo/bad.py", line 2
+                x =  # Cause import error
+                                        ^
+            SyntaxError: invalid syntax
+
+            During handling of the above exception, another exception occurred:
+
+            Traceback (most recent call last):
+              File "<string>", line 1, in <module>
+              File "foobake.py/pybake/abstractimporter.py", line 92, in load_module
+              File "foobake.py/pybake/v2v3.py", line 16, in reraise
+              File "foobake.py/pybake/abstractimporter.py", line 83, in load_module
+            ImportError: SyntaxError: invalid syntax (bad.py, line 2), while importing 'tests.foo.bad'
+            ''')
+    else:
+        expected = dedent('''\
+            Traceback (most recent call last):
+              File "<string>", line 1, in <module>
+              File "foobake.py/pybake/abstractimporter.py", line 92, in load_module
+              File "foobake.py/pybake/abstractimporter.py", line 83, in load_module
+            ImportError: SyntaxError: invalid syntax (bad.py, line 2), while importing 'tests.foo.bad'
+            ''')
+
+    assert expected == stderr

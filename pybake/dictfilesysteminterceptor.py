@@ -3,18 +3,17 @@ from __future__ import absolute_import
 import errno
 import os
 try:
-    from StringIO import StringIO
+    from StringIO import StringIO as BytesIO
 except ImportError:
-    from io import StringIO
+    from io import BytesIO
 
-from pybake.six import builtins
-from pybake.filesysteminterceptor import FileSystemInterceptor
+from pybake.filesysteminterceptor import FileSystemInterceptor, BUILTINS_OPEN
 
 
 class DictFileSystemInterceptor(FileSystemInterceptor):
     def __init__(self, reader):
         intercept_list = [
-            '__builtin__.open',
+            BUILTINS_OPEN,
             'os.path.isfile',
             'os.path.isdir',
             'os.path.exists',
@@ -27,10 +26,13 @@ class DictFileSystemInterceptor(FileSystemInterceptor):
         self._reader = reader
         self._fileno = FileNo()
 
+    def _builtins_open(self, *args, **kwargs):
+        return self._builtin_open(*args, **kwargs)
+
     def _builtin_open(self, path, mode='r', *args, **kwargs):
         tpath = self._reader.tpath(path)
         if tpath is None:
-            return self._oldhooks['__builtin__.open'](path, mode, *args, **kwargs)
+            return self._oldhooks[BUILTINS_OPEN](path, mode, *args, **kwargs)
         if 'w' in mode:
             raise IOError(errno.EROFS, 'Read-only file system', path)
         content = self._reader.read(tpath)
@@ -125,11 +127,11 @@ class FileNo(object):
             pass
 
 
-class FrozenFile(StringIO):
+class FrozenFile(BytesIO):
     def __init__(self, fileno, path, content):
         self._fileno = fileno
         self._path = path
-        StringIO.__init__(self, content)
+        BytesIO.__init__(self, content)
 
     def __enter__(self):
         return self

@@ -19,19 +19,19 @@ test:
 	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
 
 
-test2: develop2
+test2: develop2 check
 	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
 
 
-test3: develop3
+test3: develop3 check
 	pytest ./tests/ -vvv --junitxml=./reports/unittest-results.xml
 
 
-to_pypi_test:
+to_pypi_test: test2 test3
 	python setup.py register -r pypitest
 	python setup.py sdist upload -r pypitest
 
 
-to_pypi_live:
+to_pypi_live: test2 test3
 	python setup.py register -r pypi
 	python setup.py sdist upload -r pypi

@@ -5,3 +5,4 @@ reports/
 dist/
 pybake.egg-info/
 virtualenv/
+.pytest_cache/

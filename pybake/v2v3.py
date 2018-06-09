@@ -4,23 +4,20 @@ import sys
 __all__ = ['exec_', 'reraise', 'builtins']
 
 
-def reraise(*args):
-    pass
-
 if sys.version_info[0] == 3:
     import builtins
     exec_ = getattr(builtins, "exec")
 
-    # def reraise(tp, value, tb=None):
-    #     try:
-    #         if value is None:
-    #             value = tp()
-    #         if value.__traceback__ is not tb:
-    #             raise value.with_traceback(tb)
-    #         raise value
-    #     finally:
-    #         value = None
-    #         tb = None
+    def reraise(tp, value, tb=None):
+        try:
+            if value is None:
+                value = tp()
+            if value.__traceback__ is not tb:
+                raise value.with_traceback(tb)
+            raise value
+        finally:
+            value = None
+            tb = None
 
 else:
     def exec_(_code_, _globs_=None, _locs_=None):
